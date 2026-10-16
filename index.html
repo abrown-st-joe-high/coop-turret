@@ -17,6 +17,13 @@ td{padding:4px 12px;border-bottom:1px solid #223}
 button{background:#12203a;color:#d8f2ff;border:1px solid #3a6;border-radius:8px;padding:10px 18px;margin:4px;font-size:clamp(12px,1.8vw,16px);cursor:pointer}
 button:hover{background:#1d3560}
 p{margin:6px 0;font-size:clamp(11px,1.5vw,14px);color:#9ab}
+#opts{position:absolute;inset:0;background:rgba(4,5,14,.97);overflow:auto;padding:14px 18px;box-sizing:border-box;display:none}
+#opts h2{margin:0 0 6px;text-align:center;letter-spacing:.1em}
+#opts h3{margin:12px 0 4px;color:#ffcf5a;font-size:14px;border-bottom:1px solid #223}
+.row{display:grid;grid-template-columns:minmax(120px,2fr) 3fr 52px;gap:8px;align-items:center;font-size:clamp(11px,1.5vw,14px);padding:2px 0}
+.row input{width:100%}
+.row span{text-align:right;color:#7fd;font-variant-numeric:tabular-nums}
+#opts .bar{text-align:center;margin:8px 0}
 </style>
 </head>
 <body>
@@ -40,7 +47,14 @@ p{margin:6px 0;font-size:clamp(11px,1.5vw,14px);color:#9ab}
 <button onclick="start('fly')">2 · Dogfight Run</button>
 <button onclick="start('cycle')">3 · Cycle (swaps each level)</button>
 <button onclick="start('chase')">4 · Chase (lock-on missiles)</button>
+<button onclick="showOpts(true)">Options</button>
 </div>
+</div>
+<div id="opts">
+<h2>OPTIONS</h2>
+<div class="bar">Presets: <button onclick="preset('easy')">Easy</button><button onclick="preset('normal')">Normal</button><button onclick="preset('hard')">Hard</button></div>
+<div id="optlist"></div>
+<div class="bar"><button onclick="showOpts(false)">Back</button></div>
 </div>
 </div>
 <script>
@@ -48,9 +62,10 @@ const W=960,H=600,cv=document.getElementById('c'),g=cv.getContext('2d');cv.width
 const $=id=>document.getElementById(id),rnd=(a,b)=>a+Math.random()*(b-a),keys={};
 let state='menu',setting='fixed',view='fixed',blend=0;
 let hull,score,kills,level,cross,enemies,fx,spawnT,fireT,alt,sync,bigCd,shake,flash,banner='',bannerT=0,last=0;
-const SLOW=40,FAST=320,BASE=3,BIG_CD=3.5,BIG_R=100;
+let SLOW=40,FAST=320,BASE=3,BIG_CD=3.5;const BIG_R=100;
 let yaw=0,pitch=0,pp=[0,0,0],cam,tgt,dust=[],missiles=[],lock=0,locked=false,esc=0,mCd=0,tE=-1e9,tQ=-2e9;
-const PSPD=140,TURN=1.15,FOC=520,LOCKX=70,LOCKY=50,BIGX=240,BIGY=170,MS=4,LV=[.3,.8,-.5];
+let PSPD=140,TURN=1.15,LOCKX=70,LOCKY=50,MS=4;
+const FOC=520,BIGX=240,BIGY=170,LV=[.3,.8,-.5];
 const vname=v=>v==='fly'?'DOGFIGHT':v==='chase'?'CHASE':'FIXED';
 const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],clampv=(v,a,b)=>Math.max(a,Math.min(b,v));
 const angDiff=(a,b)=>{let d=a-b;while(d>Math.PI)d-=2*Math.PI;while(d<-Math.PI)d+=2*Math.PI;return d};
@@ -69,7 +84,7 @@ addEventListener('keydown',e=>{
   if(e.code==='Quote')tQ=performance.now();
   if(state==='play'&&view==='chase'&&!e.repeat&&(e.code==='KeyE'||e.code==='Quote'))tryMissile();
   if(e.code==='KeyP'&&!e.repeat){if(state==='play')state='pause';else if(state==='pause')state='play';}
-  if((state==='menu'||state==='over')&&!e.repeat){
+  if((state==='menu'||state==='over')&&!e.repeat&&$('opts').style.display!=='block'){
     if(e.code==='Digit1')start('fixed');if(e.code==='Digit2')start('fly');if(e.code==='Digit3')start('cycle');if(e.code==='Digit4')start('chase');
   }
 });
@@ -126,7 +141,7 @@ function hurt(e,d){
 }
 function spawn(){
   const big=Math.random()<Math.min(.3,.1+.02*level),r=big?50:18,fly=view==='fly';
-  const e={big,r,hp:big?14:2,score:big?100:10,dmg:big?12:4,mode:view,age:0,t:0,ph:rnd(0,6),hitT:0,fired:false,leave:false,dead:false};
+  const e={big,r,hp:big?14:2,score:big?100:10,dmg:(big?12:4)*opt.dmg,mode:view,age:0,t:0,ph:rnd(0,6),hitT:0,fired:false,leave:false,dead:false};
   if(fly){
     e.cx=rnd(260,W-260);e.cy=rnd(130,300);e.ax=rnd(110,250);e.ay=rnd(30,90);
     e.fx=rnd(.5,1.1)*(1+level*.03);e.fy=rnd(.6,1.3);e.ph2=rnd(0,6);
@@ -161,7 +176,7 @@ function update(dt){
   if(view==='chase')chaseUpdate(dt);
   spawnT-=dt;
   const cap=view==='fly'?Math.min(7,3+Math.ceil(level/2)):8+level;
-  if(view!=='chase'&&spawnT<=0&&enemies.length<cap){spawn();spawnT=Math.max(.45,1.6-.12*level)}
+  if(view!=='chase'&&spawnT<=0&&enemies.length<cap){spawn();spawnT=Math.max(.45,1.6-.12*level)/opt.spawn}
   for(const e of enemies){
     e.age+=dt;e.hitT-=dt;
     if(e.mode==='fly'){
@@ -304,7 +319,7 @@ function initChase(){
 }
 function spawnTarget(){
   const b=basis(yaw,pitch),o=[rnd(-90,90),rnd(-50,50)],hp=20+5*level;
-  tgt={p:[0,1,2].map(i=>pp[i]+b.f[i]*320+b.r[i]*o[0]+b.u[i]*o[1]),yaw:yaw+rnd(-.4,.4),pitch:rnd(-.2,.2),t:0,ph:rnd(0,6),ph2:rnd(0,6),hp,max:hp,hitT:0,alive:true,respawn:0};
+  tgt={p:[0,1,2].map(i=>pp[i]+b.f[i]*chaseDist()+b.r[i]*o[0]+b.u[i]*o[1]),yaw:yaw+rnd(-.4,.4),pitch:rnd(-.2,.2),t:0,ph:rnd(0,6),ph2:rnd(0,6),hp,max:hp,hitT:0,alive:true,respawn:0};
 }
 function hurtTarget(d){
   const T=tgt;if(!T.alive)return;
@@ -319,12 +334,14 @@ function hurtTarget(d){
 function chaseGun(){
   const T=tgt;if(!T.alive)return;
   const p=proj(T.p);
-  if(p[2]>1&&p[2]<700&&Math.hypot(p[0]-W/2,p[1]-H/2)<16/p[2]*FOC+8){hurtTarget(1);fx.push({k:'boom',x:p[0],y:p[1],t:.12,max:.12,r:10,c:'#fff'})}
+  if(p[2]>1&&p[2]<chaseDist()+400&&Math.hypot(p[0]-W/2,p[1]-H/2)<MS*4/p[2]*FOC+8){hurtTarget(1);fx.push({k:'boom',x:p[0],y:p[1],t:.12,max:.12,r:10,c:'#fff'})}
 }
+function chaseDist(){return Math.max(opt.minDist,opt.startDist-(level-1)*opt.distStep)}
 function tryMissile(){
-  if(!locked||mCd>0||!tgt.alive||Math.abs(tE-tQ)>350)return;
-  missiles.push({p:[0,1,2].map(i=>pp[i]+cam.f[i]*10-cam.u[i]*8),d:cam.f.slice(),life:5});
-  mCd=3;lock=0;locked=false;tE=-1e9;tQ=-2e9;shake=6;
+  if(!locked||mCd>0||!tgt.alive||Math.abs(tE-tQ)>opt.win)return;
+  const chance=clampv(opt.sure-(level-1)*opt.sureDrop,opt.sureMin,100)/100,sure=Math.random()<chance;
+  missiles.push({p:[0,1,2].map(i=>pp[i]+cam.f[i]*10-cam.u[i]*8),d:cam.f.slice(),life:sure?7:5,sure});
+  mCd=opt.mcd;lock=0;locked=false;tE=-1e9;tQ=-2e9;shake=6;
 }
 function chaseUpdate(dt){
   cross.x=W/2;cross.y=H/2;camBasis();
@@ -335,32 +352,34 @@ function chaseUpdate(dt){
   if(!T.alive){T.respawn-=dt;if(T.respawn<=0)spawnTarget()}
   else{
     T.t+=dt;T.hitT-=dt;
-    const rel=[T.p[0]-pp[0],T.p[1]-pp[1],T.p[2]-pp[2]],dist=Math.hypot(rel[0],rel[1],rel[2]),lv=1+level*.12;
+    const rel=[T.p[0]-pp[0],T.p[1]-pp[1],T.p[2]-pp[2]],dist=Math.hypot(rel[0],rel[1],rel[2]),lv=opt.evade*(1+(level-1)*opt.ramp),D=chaseDist();
     let yr=(.9*Math.sin(T.t*.7+T.ph)+.5*Math.sin(T.t*1.9+T.ph2))*lv,pr=(.5*Math.sin(T.t*.9+T.ph2)-T.pitch*.8)*lv;
-    if(dist>650){
-      const dv=[0,1,2].map(i=>pp[i]+cam.f[i]*250-T.p[i]),dl=Math.hypot(dv[0],dv[1],dv[2])||1;
+    if(dist>D+350){
+      const dv=[0,1,2].map(i=>pp[i]+cam.f[i]*D-T.p[i]),dl=Math.hypot(dv[0],dv[1],dv[2])||1;
       yr=clampv(angDiff(Math.atan2(dv[0],dv[2]),T.yaw)*1.5,-1.2,1.2);
       pr=clampv((Math.asin(clampv(dv[1]/dl,-1,1))-T.pitch)*1.5,-.8,.8);
     }
     T.yaw+=yr*dt;T.pitch=clampv(T.pitch+pr*dt,-1.1,1.1);
-    const tb=basis(T.yaw,T.pitch),spd=PSPD+clampv((300-dist)*.5,-70,90);
+    const tb=basis(T.yaw,T.pitch),spd=PSPD+clampv((D-dist)*.5,-70,90);
     for(let i=0;i<3;i++)T.p[i]+=tb.f[i]*spd*dt;
     const p=proj(T.p),ox=p[0]-W/2,oy=p[1]-H/2;
-    const inBig=p[2]>1&&Math.abs(ox)<BIGX&&Math.abs(oy)<BIGY&&dist<850;
-    const inSmall=p[2]>1&&Math.abs(ox)<LOCKX&&Math.abs(oy)<LOCKY&&dist<700;
-    if(inSmall)lock=Math.min(1,lock+dt/1.8);else if(lock>=1&&inBig)lock=1;else lock=Math.max(0,lock-dt);
+    const inBig=p[2]>1&&Math.abs(ox)<BIGX&&Math.abs(oy)<BIGY&&dist<D+550;
+    const inSmall=p[2]>1&&Math.abs(ox)<LOCKX&&Math.abs(oy)<LOCKY&&dist<D+400;
+    if(inSmall)lock=Math.min(1,lock+dt/opt.lockT);else if(lock>=1&&inBig)lock=1;else lock=Math.max(0,lock-dt);
     locked=lock>=1;
-    esc=clampv(esc+(inBig?-.5:.22)*dt,0,1);
-    if(esc>=1){hull-=25;flash=.4;shake=10;setBanner('TARGET LOST');T.alive=false;T.respawn=1.5;esc=0;lock=0;locked=false}
+    esc=clampv(esc+(inBig?-.5:opt.esc)*dt,0,1);
+    if(esc>=1){hull-=25*opt.dmg;flash=.4;shake=10;setBanner('TARGET LOST');T.alive=false;T.respawn=1.5;esc=0;lock=0;locked=false}
   }
   for(const m of missiles){
     m.life-=dt;
     if(T.alive){
       const d=[0,1,2].map(i=>T.p[i]-m.p[i]),dl=Math.hypot(d[0],d[1],d[2])||1;
-      if(dl<20){m.life=0;const q=proj(m.p);fx.push({k:'boom',x:q[0],y:q[1],t:.4,max:.4,r:40,c:'#ffb040'});hurtTarget(10)}
+      if(dl<(m.sure?26:20)){m.life=0;const q=proj(m.p);fx.push({k:'boom',x:q[0],y:q[1],t:.4,max:.4,r:40,c:'#ffb040'});hurtTarget(m.sure?T.hp+1:10)}
+      else if(m.sure)m.d=d.map(v=>v/dl);
       else{const k=Math.min(1,2.4*dt),n=[0,1,2].map(i=>m.d[i]+(d[i]/dl-m.d[i])*k),nl=Math.hypot(n[0],n[1],n[2])||1;m.d=n.map(v=>v/nl)}
     }
-    for(let i=0;i<3;i++)m.p[i]+=m.d[i]*380*dt;
+    const sp=m.sure?520:380;
+    for(let i=0;i<3;i++)m.p[i]+=m.d[i]*sp*dt;
   }
   missiles=missiles.filter(m=>m.life>0);
 }
@@ -411,7 +430,7 @@ function drawChaseHud(){
   if(T.alive){
     const dist=Math.round(Math.hypot(T.p[0]-pp[0],T.p[1]-pp[1],T.p[2]-pp[2]));
     if(p[2]>1&&Math.abs(p[0]-W/2)<W/2&&Math.abs(p[1]-H/2)<H/2){
-      const r=Math.max(16,20/p[2]*FOC),x=p[0],y=p[1],L=r*.4;
+      const r=Math.max(16,MS*5/p[2]*FOC),x=p[0],y=p[1],L=r*.4;
       g.strokeStyle=locked?'#f55':'#7fd';g.lineWidth=2;g.beginPath();
       for(const [sx,sy] of [[-1,-1],[1,-1],[1,1],[-1,1]]){g.moveTo(x+sx*r,y+sy*(r-L));g.lineTo(x+sx*r,y+sy*r);g.lineTo(x+sx*(r-L),y+sy*r)}
       g.stroke();g.fillStyle=locked?'#f55':'#7fd';g.fillText(dist+' m',x,y+r+16);
@@ -464,6 +483,55 @@ function loop(t){
   draw(dt,t);
   requestAnimationFrame(loop);
 }
+const OPTS=[
+ ['General','slow','Crawl speed (one player or disagreeing)',10,150,5,40],
+ ['General','fast','Full speed (both agree)',150,500,10,320],
+ ['General','base','Fire rate, shots/sec (1x; both firing = 4x)',1,8,.5,3],
+ ['General','bigcd','Big blast recharge (s)',1,10,.5,3.5],
+ ['General','dmg','Damage taken x',.25,3,.25,1],
+ ['General','spawn','Enemy spawn rate x (fixed / dogfight / cycle)',.5,3,.25,1],
+ ['General','win','Two-player press window, E + \' (ms)',100,1000,50,350],
+ ['Chase','startDist','Target distance at level 1',250,800,10,520],
+ ['Chase','minDist','Closest distance at high levels',200,600,10,300],
+ ['Chase','distStep','Distance shrink per level',0,100,5,30],
+ ['Chase','evade','Target evasiveness x',.2,2,.1,.8],
+ ['Chase','ramp','Evasiveness growth per level',0,.5,.05,.15],
+ ['Chase','lockT','Lock-on time (s)',.5,4,.1,1.4],
+ ['Chase','box','Lock box size x',.5,2.5,.1,1.3],
+ ['Chase','esc','Escape speed (how fast a lost target flees)',.05,.6,.05,.15],
+ ['Chase','turn','Ship turn rate (rad/s)',.5,2.5,.05,1.15],
+ ['Chase','psp','Ship speed',80,240,5,140],
+ ['Chase','tsize','Target size x',.7,3,.1,1.6],
+ ['Chase','mcd','Missile reload (s)',.5,8,.5,3],
+ ['Chase','sure','Guaranteed-kill chance at level 1 (%)',0,100,5,100],
+ ['Chase','sureDrop','Guaranteed chance lost per level (%)',0,50,5,15],
+ ['Chase','sureMin','Lowest guaranteed chance (%)',0,100,5,10]
+];
+const DEF={};OPTS.forEach(o=>DEF[o[1]]=o[6]);
+const PRESETS={
+ easy:{slow:60,base:4,dmg:.5,spawn:.75,win:600,startDist:600,minDist:400,distStep:20,evade:.5,ramp:.1,lockT:1,box:1.6,esc:.1,tsize:2,sureDrop:10,sureMin:30},
+ normal:{},
+ hard:{slow:30,dmg:1.5,spawn:1.5,win:250,startDist:400,minDist:250,distStep:40,evade:1.2,ramp:.25,lockT:2,box:1,esc:.25,tsize:1.2,sure:50,sureDrop:20,sureMin:0}
+};
+let opt=Object.assign({},DEF);
+try{const sv=JSON.parse(localStorage.getItem('turretOpts')||'{}');for(const k in DEF)if(typeof sv[k]==='number')opt[k]=sv[k]}catch(e){}
+function applyOpts(){
+  SLOW=opt.slow;FAST=opt.fast;BASE=opt.base;BIG_CD=opt.bigcd;PSPD=opt.psp;TURN=opt.turn;
+  LOCKX=70*opt.box;LOCKY=50*opt.box;MS=4*opt.tsize;
+  try{localStorage.setItem('turretOpts',JSON.stringify(opt))}catch(e){}
+}
+function buildOpts(){
+  let h='',sec='';
+  for(const [sc,k,l,mn,mx,st] of OPTS){
+    if(sc!==sec){sec=sc;h+='<h3>'+(sc==='Chase'?'Chase mode':'General')+'</h3>'}
+    h+='<div class="row"><label>'+l+'</label><input type="range" min="'+mn+'" max="'+mx+'" step="'+st+'" value="'+opt[k]+'" oninput="setOpt(\''+k+'\',this.value)"><span id="v_'+k+'">'+opt[k]+'</span></div>';
+  }
+  $('optlist').innerHTML=h;
+}
+function setOpt(k,v){opt[k]=+v;$('v_'+k).textContent=+v;applyOpts()}
+function preset(n){opt=Object.assign({},DEF,PRESETS[n]);buildOpts();applyOpts()}
+function showOpts(v){if(v)buildOpts();$('opts').style.display=v?'block':'none';$('menu').style.display=v?'none':'flex'}
+applyOpts();
 requestAnimationFrame(loop);
 </script>
 </body>
